@@ -1,0 +1,7 @@
+.{
+    .name = .zig_gpu_demo,
+    .version = "0.1.0",
+    .fingerprint = 0x200d2bb44c82eed1,
+    .minimum_zig_version = "0.14.0",
+    .paths = .{""},
+}

@@ -4,72 +4,101 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // --- Configurable knobs -------------------------------------------------
-    // Compile-time: the kernel's local workgroup size is baked into the SPIR-V,
-    // so it must be known when the kernel is compiled. Shared with the host so
-    // both agree on how many groups to dispatch.
-    const wgsize = b.option(u32, "wgsize", "Kernel workgroup size (X); recompiles the kernel") orelse 64;
-    // Runtime: forwarded to the program as CLI flags; no rebuild needed.
-    const threshold = b.option([]const u8, "threshold", "Filter cutoff; keep values > threshold") orelse "128";
-    const n = b.option([]const u8, "n", "Number of elements to process") orelse "256";
-    const validate = b.option(bool, "validate", "Enable Vulkan validation layer if installed") orelse false;
+    // --- Module Config -------------------------------------------------------
 
-    // A generated `config` module carries the compile-time workgroup size to
-    // both the kernel and the host, keeping them in sync from one -Dwgsize.
-    const cfg = b.addOptions();
-    cfg.addOption(u32, "wg_size", wgsize);
-    const cfg_mod = cfg.createModule();
+    // Regenerate the vulkan-zig bindings from the Vulkan registry via the
+    // vulkan-zig generator (a lazy dependency, only fetched when this is set).
+    // Off by default: the vkzig/gpu hosts use the vendored src/bingings/vk.zig.
+    const gen_vk = b.option(bool, "gen-vk", "Regenerate vulkan-zig bindings from the registry instead of using the vendored src/vulkan/vk.zig") orelse false;
+    const vk_registry = b.option([]const u8, "vk-registry", "Path to the Vulkan registry (vk.xml) used by -Dgen-vk") orelse "/usr/share/vulkan/registry/vk.xml";
 
-    // 1. Compile the GPU kernel to a SPIR-V module with the self-hosted backend.
-    //    `spirv32-vulkan` + `vulkan_v1_2` matches what Vulkan drivers ingest.
+    // --- vulkan-zig bindings source -------------------------------------------
+    // Default: the vkzig/gpu hosts import the vendored static file by *relative
+    // path* (`@import("vk.zig")`, resolved next to each source file), which keeps
+    // language-server goto-definition working. With -Dgen-vk we instead run the
+    // vulkan-zig generator over the registry and override the `vk.zig` import on
+    // those modules to point at the freshly generated file.
+    const vk_zig_generated: ?std.Build.LazyPath = if (gen_vk) blk: {
+        // Lazy: the dependency is only fetched when -Dgen-vk is actually passed.
+        const vulkan_zig = b.lazyDependency("vulkan_zig", .{
+            .target = b.graph.host,
+            .optimize = .ReleaseSafe,
+        }) orelse break :blk null;
+        const gen = b.addRunArtifact(vulkan_zig.artifact("vulkan-zig-generator"));
+        gen.addFileArg(.{ .cwd_relative = vk_registry }); // registry lives outside the repo
+        break :blk gen.addOutputFileArg("vk.zig");
+    } else null;
+
+    // ------ The Spock Module -------
+    const spock = b.addModule("spock", .{
+        .root_source_file = b.path("src/spock.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true, // the Vulkan loader (libvulkan.so) needs libc
+    });
+    if (vk_zig_generated) |vkzig| {
+        spock.addImport("vulkan", b.createModule(.{ .root_source_file = vkzig }));
+    } else {
+        spock.addImport("vulkan", b.createModule(.{ .root_source_file = b.path("src/bindings/vk.zig") }));
+    }
+    spock.linkSystemLibrary("vulkan", .{});
+}
+
+/// Zig build module definition for `addImport()`
+pub const ModImport = struct {
+    name: []const u8,
+    mod: *std.Build.Module,
+};
+
+/// Options used to build a Vulkan SPIR-V kernel
+pub const KernelOpts = struct {
+    name: []const u8,
+    root_source_file: std.Build.LazyPath,
+    optimize: std.builtin.OptimizeMode,
+    imports: ?[]const ModImport = null,
+};
+
+/// Add a compiled SPIR-V kernel
+///
+/// Compiles the 'main()' entrypoint to a Vulkan compute kernel
+///
+/// Returns a LazyPath to the generated .spv file
+///
+/// After adding 'spock' as a dependency to your `build.zig.zon`,
+/// you can use this in your `build.zig` like:
+///
+///     const spv_file: std.Build.LazyPath = @import("spock").addSpirvKernel(
+///         .name = "filter",
+///         .root_source_file = b.path("src/kernels/filter.zig"),
+///         .imports = &.{.{ .name = "config", .mod = cfg_mod }},
+///         .optimize = optimize,
+///     );
+///     my_exe.root_module.addAnonymousImport("filter.spv", .{ .root_source_file = kernel_spv });
+///
+/// Then in your host-side .zig file:
+///
+///     const filter_spv = @embedFile("filter.spv");
+pub fn addSpirvKernel(b: *std.Build, opts: KernelOpts) std.Build.LazyPath {
     const spirv_target = b.resolveTargetQuery(std.Target.Query.parse(.{
         .arch_os_abi = "spirv32-vulkan",
-        .cpu_features = "vulkan_v1_2",
+        .cpu_features = "vulkan_v1_2+float64",
     }) catch @panic("bad spirv target"));
 
     const kernel = b.addObject(.{
-        .name = "vk_filter",
+        .name = opts.name,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("vk_filter.zig"),
+            .root_source_file = opts.root_source_file,
             .target = spirv_target,
-            .optimize = optimize,
+            .optimize = opts.optimize,
         }),
-    });
-    kernel.root_module.addImport("config", cfg_mod);
-    const kernel_spv = kernel.getEmittedBin(); // LazyPath to vk_filter.spv
-
-    // 2. Translate <vulkan/vulkan.h> into a Zig module (@cImport is gone in 0.17-dev).
-    const vk = b.addTranslateC(.{
-        .root_source_file = b.path("vkimport.c"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
+        .use_llvm = false, // SPIR-V is only supported by Zig's self-hosted backend.
     });
 
-    // 3. The host executable: links Vulkan, imports the bindings, and embeds the .spv.
-    const exe = b.addExecutable(.{
-        .name = "vk_host",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("vk_host.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-    });
-    exe.root_module.addImport("vk", vk.createModule());
-    exe.root_module.addImport("config", cfg_mod);
-    // Makes `@embedFile("vk_filter.spv")` resolve to the compiled kernel.
-    exe.root_module.addAnonymousImport("vk_filter.spv", .{ .root_source_file = kernel_spv });
-    exe.root_module.linkSystemLibrary("vulkan", .{});
+    if (opts.imports) |imports| {
+        for (imports) |mod| {
+            kernel.root_module.addImport(mod.name, mod.mod);
+        }
+    }
 
-    b.installArtifact(exe);
-
-    const run = b.addRunArtifact(exe);
-    run.addArgs(&.{
-        b.fmt("--threshold={s}", .{threshold}),
-        b.fmt("--n={s}", .{n}),
-    });
-    if (validate) run.addArg("--validate");
-    run.step.dependOn(b.getInstallStep());
-    b.step("run", "Build the kernel + host and run the compute demo").dependOn(&run.step);
+    return kernel.getEmittedBin();
 }

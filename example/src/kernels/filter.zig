@@ -7,10 +7,12 @@ const InBuf = extern struct { data: InArray };
 const OutBuf = extern struct { data: OutArray };
 
 const input = @extern(*addrspace(.storage_buffer) const InBuf, .{
-    .name = "input", .decoration = .{ .descriptor = .{ .set = 0, .binding = 0 } },
+    .name = "input",
+    .decoration = .{ .descriptor = .{ .set = 0, .binding = 0 } },
 });
 const output = @extern(*addrspace(.storage_buffer) OutBuf, .{
-    .name = "output", .decoration = .{ .descriptor = .{ .set = 0, .binding = 1 } },
+    .name = "output",
+    .decoration = .{ .descriptor = .{ .set = 0, .binding = 1 } },
 });
 
 // Push constants: small block of data the host supplies per-dispatch, no descriptor

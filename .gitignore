@@ -1,7 +1,12 @@
 # Zig build artifacts
 .zig-cache/
 zig-out/
+zig-pkg/
 
 # Compiled SPIR-V / objects (produced by the build)
 *.spv
 *.o
+
+# Other
+tmp/
+*.tmp

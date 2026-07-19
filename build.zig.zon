@@ -1,7 +1,23 @@
 .{
-    .name = .zig_gpu_demo,
+    .name = .spock,
+    .fingerprint = 0xc454c13732a2699e,
+    .minimum_zig_version = "0.17.0-dev.1435",
     .version = "0.1.0",
-    .fingerprint = 0x200d2bb44c82eed1,
-    .minimum_zig_version = "0.14.0",
-    .paths = .{""},
+    // The vulkan-zig bindings are vendored as a static file at src/vulkan/vk.zig
+    // (regenerate out-of-band with tools/gen-vk.sh, or in-tree with `zig build
+    // -Dgen-vk`). The generator is only needed for the latter, so it is a lazy
+    // dependency: it is not fetched unless -Dgen-vk is passed. Keep the commit in
+    // sync with VULKAN_ZIG_COMMIT in tools/gen-vk.sh.
+    .dependencies = .{
+        .vulkan_zig = .{
+            .url = "https://github.com/Snektron/vulkan-zig/archive/057180744c666bb62e20877fe106422784a5e29a.tar.gz",
+            .hash = "vulkan-0.0.0-r7Ytx_6DAwDB1QJAbIew5IzR2PiiAtJENX5kdJHf449X",
+            .lazy = true,
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
 }

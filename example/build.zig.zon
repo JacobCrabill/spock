@@ -1,0 +1,14 @@
+.{
+    .name = .spock_demo,
+    .fingerprint = 0x92b4d668fed488b1,
+    .minimum_zig_version = "0.17.0-dev.1435",
+    .version = "0.1.0",
+    .dependencies = .{
+        .spock = .{ .path = "../" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

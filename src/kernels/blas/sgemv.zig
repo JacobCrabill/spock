@@ -1,4 +1,4 @@
-//! Performs a dense double-precision matrix-vector multiplication.
+//! Performs a dense single-precision matrix-vector multiplication.
 //!
 //!     y := alpha * A * x + beta * y
 //!
@@ -10,16 +10,18 @@
 //!
 //! The matrix is assumed to be row-major with stride equal to the number of columns.
 //!
+//! The single-precision twin of `dgemv.zig`; keep the two in step.
+//!
 //! TODO: Allow stride != columns for cache alignment
 //! TODO: Implement the transposed variant (y := alpha * A^T * x + beta * y)
 //! TODO: Reduce across a workgroup instead of one thread per row, which serialises
 //!       the whole dot product onto a single lane for wide matrices
 
 // Export the entrypoint - _but only when compiling for spir-v_
-// This allows the host-side code to @import("dgemv.zig")
+// This allows the host-side code to @import("sgemv.zig")
 comptime {
     if (@import("builtin").target.cpu.arch.isSpirV()) {
-        @export(&dgemv, .{ .name = "dgemv" });
+        @export(&sgemv, .{ .name = "sgemv" });
     }
 }
 
@@ -30,8 +32,8 @@ comptime {
 pub const PushConstants = extern struct {
     M: u32,
     N: u32,
-    alpha: f64,
-    beta: f64,
+    alpha: f32,
+    beta: f32,
 };
 
 /// The number of threads per workgroup
@@ -47,7 +49,7 @@ pub const WgSize = extern struct {
 // all SPIR-V types (Objects in the 'storage_buffer' address space must be structs,
 // and 'runtime_array' objects must be the last member of a struct, as the length is
 // not known at compile time).
-const VkArray = @SpirvType(.{ .runtime_array = f64 });
+const VkArray = @SpirvType(.{ .runtime_array = f32 });
 const VkBuf = extern struct { data: VkArray };
 
 const Amat = @extern(*addrspace(.storage_buffer) const VkBuf, .{
@@ -66,16 +68,16 @@ const yvec = @extern(*addrspace(.storage_buffer) VkBuf, .{
 
 const pc = @extern(*addrspace(.push_constant) const PushConstants, .{ .name = "pc" });
 
-/// Naive DGEMV
+/// Naive SGEMV
 ///
 /// Use one thread per output value.
 /// Each thread calculates y_i = alpha * A_ij * x_j + beta * y_i for its row i
-fn dgemv() callconv(.{ .spirv_kernel = .{ .x = WgSize.x, .y = WgSize.y, .z = WgSize.z } }) void {
+fn sgemv() callconv(.{ .spirv_kernel = .{ .x = WgSize.x, .y = WgSize.y, .z = WgSize.z } }) void {
     const i = std.spirv.global_invocation_id[0];
 
     if (i >= pc.M) return;
 
-    var sum: f64 = 0.0;
+    var sum: f32 = 0.0;
     for (0..pc.N) |j| {
         sum += Amat.data[j + i * pc.N] * xvec.data[j];
     }
@@ -83,12 +85,9 @@ fn dgemv() callconv(.{ .spirv_kernel = .{ .x = WgSize.x, .y = WgSize.y, .z = WgS
     // BLAS semantics: when beta is zero `y` is *not* read, so an uninitialised or
     // NaN-filled output buffer is still valid input.
     //
-    // Keep this as an explicit load/scale/store. Writing it as the compound
-    // `y *= beta; y += sum;` miscompiles: the SPIR-V backend silently drops the
-    // multiply-assign store, leaving `beta` with no effect at all. It reproduces
-    // in dgemm but not in a reduced kernel, so the exact trigger is unknown —
-    // treat compound assignment through a storage_buffer pointer as unsafe.
-    const prev: f64 = if (pc.beta == 0.0) 0.0 else pc.beta * yvec.data[i];
+    // Keep this as an explicit load/scale/store — see the note in `dgemv.zig` for
+    // why the compound `y *= beta` form must not be used here.
+    const prev: f32 = if (pc.beta == 0.0) 0.0 else pc.beta * yvec.data[i];
     yvec.data[i] = pc.alpha * sum + prev;
 }
 

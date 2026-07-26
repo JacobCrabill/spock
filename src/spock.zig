@@ -29,5 +29,8 @@ pub const Kernel = @import("core/kernel.zig").Kernel;
 pub const Pipeline = @import("core/pipeline.zig").Pipeline;
 
 test {
-    _ = @import("kernels/test.zig");
+    _ = @import("kernels/tests/dgemm.zig");
+    _ = @import("kernels/tests/dgemv.zig");
+    _ = @import("kernels/tests/sgemm.zig");
+    _ = @import("kernels/tests/sgemv.zig");
 }

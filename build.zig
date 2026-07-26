@@ -45,31 +45,38 @@ pub fn build(b: *std.Build) void {
 
     // ------ Built-In Kernels for Linear Algebra ------
 
-    const dgemm_spv = addSpirvKernel(b, .{
-        .name = "dgemm",
-        .root_source_file = b.path("src/kernels/blas/dgemm.zig"),
-        .optimize = optimize,
-    });
-    b.addNamedLazyPath("dgemm.spv", dgemm_spv);
-
-    const dgemv_spv = addSpirvKernel(b, .{
-        .name = "dgemv",
-        .root_source_file = b.path("src/kernels/blas/dgemv.zig"),
-        .optimize = optimize,
-    });
-    b.addNamedLazyPath("dgemv.spv", dgemv_spv);
-
     // ------ Unit Tests ------
 
     const test_exe = b.addTest(.{ .name = "test", .root_module = spock });
-    test_exe.root_module.addAnonymousImport("dgemm.spv", .{ .root_source_file = dgemm_spv });
-    test_exe.root_module.addAnonymousImport("dgemv.spv", .{ .root_source_file = dgemv_spv });
+
+    // Each kernel is compiled to SPIR-V, exposed to downstream builds as a named
+    // LazyPath, and embedded into the test exe as `<name>.spv`. The imports land on
+    // the *root* module, so any file in the spock module can `@embedFile` them.
+    inline for (blas_kernels) |name| {
+        const spv = addSpirvKernel(b, .{
+            .name = name,
+            .root_source_file = b.path(b.fmt("src/kernels/blas/{s}.zig", .{name})),
+            .optimize = optimize,
+        });
+        const spv_name = "spock/" ++ name ++ ".spv";
+        b.addNamedLazyPath(spv_name, spv);
+        test_exe.root_module.addAnonymousImport(spv_name, .{ .root_source_file = spv });
+    }
 
     const run_step = b.addRunArtifact(test_exe);
     run_step.has_side_effects = true; // Force the test to always be run on command
     const step = b.step("test", "Run all compute-kernel unit tests");
     step.dependOn(&run_step.step);
 }
+
+/// Built-in linear-algebra kernels. Each entry `x` expects `src/kernels/blas/x.zig`
+/// with an entrypoint exported as `x`, and a test in `src/kernels/tests/x.zig`.
+const blas_kernels = [_][]const u8{
+    "dgemm",
+    "dgemv",
+    "sgemm",
+    "sgemv",
+};
 
 /// Zig build module definition for `addImport()`
 pub const ModImport = struct {

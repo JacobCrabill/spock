@@ -7,20 +7,11 @@
 //!     Great for iterative solvers on integrated / resizable-BAR GPUs; for a
 //!     huge discrete-GPU working set you'd switch to device-local + staging.
 //!
-//! Typical use:
-//!   var ctx = try gpu.Context.init(gpa, .{ .pick = .largest });
-//!   defer ctx.deinit();
-//!   var x = try ctx.alloc(f32, n); defer x.deinit();
-//!   for (x.slice(), 0..) |*v, i| v.* = ...;              // fill on host
-//!   var k = try ctx.kernel(.{ .spirv = @embedFile("k.spv"), .buffers = 2 });
-//!   defer k.deinit();
-//!   try k.dispatch(.{ .buffers = &.{ x.raw(), y.raw() }, .groups = .{ g, 1, 1 } });
-//!   try ctx.wait();
-//!   y.copyToHost(host_slice);                             // read results back
+//! See tests or the examples dir for representative usage.
 
-const std = @import("std");
-
-/// Re-export the Vulkan bindings from vulkan-zig
+/// Re-export the Vulkan bindings from vulkan-zig.
+/// This points to the zig build cache if the bindings were regenerated from
+/// the user's host `vk.xml` file, otherwise `bindings/vk.zig` is used.
 pub const vk = @import("vulkan");
 
 pub const Context = @import("core/context.zig").Context;
@@ -30,9 +21,6 @@ pub const Pipeline = @import("core/pipeline.zig").Pipeline;
 
 pub const kernels = @import("kernels/kernels.zig");
 
-test {
-    _ = @import("kernels/tests/dgemm.zig");
-    _ = @import("kernels/tests/dgemv.zig");
-    _ = @import("kernels/tests/sgemm.zig");
-    _ = @import("kernels/tests/sgemv.zig");
+test "spock" {
+    @import("std").testing.refAllDecls(@This());
 }

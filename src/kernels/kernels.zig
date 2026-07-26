@@ -19,3 +19,10 @@ pub const blas = struct {
     pub const sgemm = @import("blas/sgemm.zig");
     pub const sgemv = @import("blas/sgemv.zig");
 };
+
+test {
+    _ = @import("tests/dgemm.zig");
+    _ = @import("tests/dgemv.zig");
+    _ = @import("tests/sgemm.zig");
+    _ = @import("tests/sgemv.zig");
+}

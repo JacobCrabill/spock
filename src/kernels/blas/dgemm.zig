@@ -1,4 +1,4 @@
-//! Performs a dense double-precision general matrix-matrix multiplication (DGEMM).
+//! Performs a dense double-precision matrix-matrix multiplication.
 //!
 //!     C := alpha * A * B + beta * C
 //!
@@ -15,7 +15,7 @@
 //! TODO: Implement blocked version with shared memory
 
 // Export the entrypoint - _but only when compiling for spir-v_
-// This allows the host-side code to @import("dgemm.zig") to access PushConstants and WgSize.
+// This allows the host-side code to @import("kernels/dgemm.zig")
 comptime {
     if (@import("builtin").target.cpu.arch.isSpirV()) {
         @export(&dgemm, .{ .name = "dgemm" });
@@ -78,10 +78,17 @@ fn dgemm() callconv(.{ .spirv_kernel = .{ .x = WgSize.x, .y = WgSize.y, .z = WgS
     const j: u32 = @mod(tid, pc.N);
 
     var sum: f64 = 0.0;
-    for (0..pc.K) |k| {
-        sum += Amat.data[k + i * pc.K] * Bmat.data[j + k * pc.N];
+    if (pc.alpha != 0.0) {
+        for (0..pc.K) |k| {
+            sum += pc.alpha * Amat.data[k + i * pc.K] * Bmat.data[j + k * pc.N];
+        }
     }
-    Cmat.data[j + i * pc.N] = sum;
+    if (pc.beta == 0.0) {
+        Cmat.data[j + i * pc.N] = sum;
+    } else {
+        Cmat.data[j + i * pc.N] *= pc.beta;
+        Cmat.data[j + i * pc.N] += sum;
+    }
 }
 
 const std = @import("std");

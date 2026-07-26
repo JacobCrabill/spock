@@ -64,6 +64,8 @@ pub const Context = struct {
     queue: vk.Queue,
     cmd_pool: vk.CommandPool,
     fence: vk.Fence,
+    /// `.null_handle` unless validation + VK_EXT_debug_utils are both active.
+    messenger: vk.DebugUtilsMessengerEXT,
 
     pub fn init(gpa: std.mem.Allocator, opts: Options) !Context {
         const vkb = vk.BaseWrapper.load(vkGetInstanceProcAddr);
@@ -76,10 +78,26 @@ pub const Context = struct {
         };
         var ici: vk.InstanceCreateInfo = .{ .p_application_info = &app };
         const layers = [_][*:0]const u8{validation_layer};
-        if (opts.validate and validationAvailable(vkb, gpa)) {
+        const use_validation = opts.validate and validationAvailable(vkb, gpa);
+        if (use_validation) {
             ici.enabled_layer_count = 1;
             ici.pp_enabled_layer_names = &layers;
         }
+
+        // Route validation output through our own callback. Without a messenger the
+        // layer writes straight to *stdout*, which `zig build test` uses as the test
+        // runner's IPC channel — the injected text desyncs the protocol and the build
+        // deadlocks. Our callback writes to stderr instead.
+        const use_debug_utils = use_validation and debugUtilsAvailable(vkb, gpa);
+        const extensions = [_][*:0]const u8{vk.extensions.ext_debug_utils.name.ptr};
+        if (use_debug_utils) {
+            ici.enabled_extension_count = 1;
+            ici.pp_enabled_extension_names = &extensions;
+            // Chaining it here as well covers messages emitted *during*
+            // vkCreateInstance / vkDestroyInstance, when no messenger exists yet.
+            ici.p_next = &debug_messenger_info;
+        }
+
         const instance_handle = try vkb.createInstance(&ici, null);
 
         const vki = try gpa.create(vk.InstanceWrapper);
@@ -87,6 +105,12 @@ pub const Context = struct {
         vki.* = vk.InstanceWrapper.load(instance_handle, vkb.dispatch.vkGetInstanceProcAddr.?);
         const instance = Instance.init(instance_handle, vki);
         errdefer instance.destroyInstance(null);
+
+        const messenger: vk.DebugUtilsMessengerEXT = if (use_debug_utils)
+            try instance.createDebugUtilsMessengerEXT(&debug_messenger_info, null)
+        else
+            .null_handle;
+        errdefer if (messenger != .null_handle) instance.destroyDebugUtilsMessengerEXT(messenger, null);
 
         // --- Pick a physical device + compute queue family ---------------------
         const devices = try instance.enumeratePhysicalDevicesAlloc(gpa);
@@ -155,6 +179,7 @@ pub const Context = struct {
             .queue = device.getDeviceQueue(chosen_qfi, 0),
             .cmd_pool = cmd_pool,
             .fence = fence,
+            .messenger = messenger,
         };
     }
 
@@ -163,6 +188,8 @@ pub const Context = struct {
         self.device.destroyCommandPool(self.cmd_pool, null);
         self.device.destroyDevice(null);
         self.gpa.destroy(self.vkd);
+        if (self.messenger != .null_handle)
+            self.instance.destroyDebugUtilsMessengerEXT(self.messenger, null);
         self.instance.destroyInstance(null);
         self.gpa.destroy(self.vki);
         self.* = undefined;
@@ -178,6 +205,44 @@ pub const Context = struct {
         _ = try self.device.waitForFences(&[_]vk.Fence{self.fence}, .true, std.math.maxInt(u64));
     }
 };
+
+/// Severity/type filter for the debug messenger. Warnings and errors only —
+/// `verbose`/`info` are far too chatty to be useful by default.
+const debug_messenger_info: vk.DebugUtilsMessengerCreateInfoEXT = .{
+    .message_severity = .{ .warning_ext = true, .error_ext = true },
+    .message_type = .{ .general_ext = true, .validation_ext = true, .performance_ext = true },
+    .pfn_user_callback = debugCallback,
+};
+
+/// Prints validation messages to **stderr**. Returning `.false` is required: a
+/// `.true` return is reserved for layer-internal testing and aborts the call.
+fn debugCallback(
+    severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+    _: vk.DebugUtilsMessageTypeFlagsEXT,
+    p_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
+    _: ?*anyopaque,
+) callconv(vk.vulkan_call_conv) vk.Bool32 {
+    const data = p_data orelse return .false;
+    const level = if (severity.error_ext) "error" else "warning";
+    const id = if (data.p_message_id_name) |n| std.mem.span(n) else "?";
+    const msg = if (data.p_message) |m| std.mem.span(m) else "";
+    std.debug.print("[vulkan:{s}] {s}: {s}\n", .{ level, id, msg });
+    return .false;
+}
+
+fn debugUtilsAvailable(vkb: vk.BaseWrapper, gpa: std.mem.Allocator) bool {
+    // Query the validation layer's own extensions: it is what implements
+    // VK_EXT_debug_utils when the driver/loader does not.
+    for ([_]?[*:0]const u8{ null, validation_layer }) |layer| {
+        const props = vkb.enumerateInstanceExtensionPropertiesAlloc(layer, gpa) catch continue;
+        defer gpa.free(props);
+        for (props) |p| {
+            const name = std.mem.sliceTo(&p.extension_name, 0);
+            if (std.mem.eql(u8, name, vk.extensions.ext_debug_utils.name)) return true;
+        }
+    }
+    return false;
+}
 
 fn validationAvailable(vkb: vk.BaseWrapper, gpa: std.mem.Allocator) bool {
     const props = vkb.enumerateInstanceLayerPropertiesAlloc(gpa) catch return false;

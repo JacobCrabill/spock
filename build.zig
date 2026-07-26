@@ -42,6 +42,33 @@ pub fn build(b: *std.Build) void {
         spock.addImport("vulkan", b.createModule(.{ .root_source_file = b.path("src/bindings/vk.zig") }));
     }
     spock.linkSystemLibrary("vulkan", .{});
+
+    // ------ Built-In Kernels for Linear Algebra ------
+
+    const dgemm_spv = addSpirvKernel(b, .{
+        .name = "dgemm",
+        .root_source_file = b.path("src/kernels/blas/dgemm.zig"),
+        .optimize = optimize,
+    });
+    b.addNamedLazyPath("dgemm.spv", dgemm_spv);
+
+    const dgemv_spv = addSpirvKernel(b, .{
+        .name = "dgemv",
+        .root_source_file = b.path("src/kernels/blas/dgemv.zig"),
+        .optimize = optimize,
+    });
+    b.addNamedLazyPath("dgemv.spv", dgemv_spv);
+
+    // ------ Unit Tests ------
+
+    const test_exe = b.addTest(.{ .name = "test", .root_module = spock });
+    test_exe.root_module.addAnonymousImport("dgemm.spv", .{ .root_source_file = dgemm_spv });
+    test_exe.root_module.addAnonymousImport("dgemv.spv", .{ .root_source_file = dgemv_spv });
+
+    const run_step = b.addRunArtifact(test_exe);
+    run_step.has_side_effects = true; // Force the test to always be run on command
+    const step = b.step("test", "Run all compute-kernel unit tests");
+    step.dependOn(&run_step.step);
 }
 
 /// Zig build module definition for `addImport()`
@@ -56,28 +83,57 @@ pub const KernelOpts = struct {
     root_source_file: std.Build.LazyPath,
     optimize: std.builtin.OptimizeMode,
     imports: ?[]const ModImport = null,
+    /// Spock's own dependency handle, i.e. the result of `b.dependency("spock", ...)`.
+    ///
+    /// Required when calling from a *consumer's* build.zig: `addSpirvKernel` receives
+    /// the caller's `b`, so it cannot otherwise locate `tools/spv_patch.zig` inside
+    /// spock's source tree. Leave null only when called from spock's own build.zig.
+    spock_dep: ?*std.Build.Dependency = null,
+    /// Run the emitted module through `tools/spv_patch.zig`. See that file for why
+    /// this is needed; turn it off once Zig emits a Vulkan-clean module.
+    patch: bool = true,
 };
 
-/// Add a compiled SPIR-V kernel
+/// Build the host-side SPIR-V patch tool (see `tools/spv_patch.zig`).
+fn addSpvPatchTool(b: *std.Build, opts: KernelOpts) *std.Build.Step.Compile {
+    const src = if (opts.spock_dep) |dep|
+        dep.path("tools/spv_patch.zig")
+    else
+        b.path("tools/spv_patch.zig");
+
+    return b.addExecutable(.{
+        .name = "spv-patch",
+        .root_module = b.createModule(.{
+            .root_source_file = src,
+            .target = b.graph.host,
+            .optimize = .ReleaseSafe,
+        }),
+    });
+}
+
+/// Add a compiled SPIR-V kernel.
 ///
-/// Compiles the 'main()' entrypoint to a Vulkan compute kernel
-///
-/// Returns a LazyPath to the generated .spv file
+/// Compiles the 'main()' entrypoint to a Vulkan compute kernel.
+/// Returns a LazyPath to the generated .spv file.
 ///
 /// After adding 'spock' as a dependency to your `build.zig.zon`,
 /// you can use this in your `build.zig` like:
 ///
-///     const spv_file: std.Build.LazyPath = @import("spock").addSpirvKernel(
+///     const spock_dep = b.dependency("spock", .{ .target = target, .optimize = optimize });
+///     const spv_file: std.Build.LazyPath = @import("spock").addSpirvKernel(b, .{
 ///         .name = "filter",
 ///         .root_source_file = b.path("src/kernels/filter.zig"),
 ///         .imports = &.{.{ .name = "config", .mod = cfg_mod }},
 ///         .optimize = optimize,
-///     );
+///         .spock_dep = spock_dep,
+///     });
 ///     my_exe.root_module.addAnonymousImport("filter.spv", .{ .root_source_file = kernel_spv });
 ///
 /// Then in your host-side .zig file:
 ///
 ///     const filter_spv = @embedFile("filter.spv");
+///
+/// For a complete usage example, see the `example/` directory.
 pub fn addSpirvKernel(b: *std.Build, opts: KernelOpts) std.Build.LazyPath {
     const spirv_target = b.resolveTargetQuery(std.Target.Query.parse(.{
         .arch_os_abi = "spirv32-vulkan",
@@ -100,5 +156,11 @@ pub fn addSpirvKernel(b: *std.Build, opts: KernelOpts) std.Build.LazyPath {
         }
     }
 
-    return kernel.getEmittedBin();
+    if (!opts.patch) return kernel.getEmittedBin();
+
+    // Zig emits a SPIR-V *object*, which declares things Vulkan rejects. Rewrite it
+    // into a conformant module before handing it to any host code.
+    const run = b.addRunArtifact(addSpvPatchTool(b, opts));
+    run.addFileArg(kernel.getEmittedBin());
+    return run.addOutputFileArg(b.fmt("{s}.spv", .{opts.name}));
 }

@@ -19,9 +19,15 @@
 //!   y.copyToHost(host_slice);                             // read results back
 
 const std = @import("std");
+
+/// Re-export the Vulkan bindings from vulkan-zig
 pub const vk = @import("vulkan");
 
-pub const Context = @import("context.zig").Context;
-pub const Buffer = @import("buffer.zig").Buffer;
-pub const Kernel = @import("kernel.zig").Kernel;
-pub const Pipeline = @import("batch.zig").Pipeline;
+pub const Context = @import("core/context.zig").Context;
+pub const Buffer = @import("core/buffer.zig").Buffer;
+pub const Kernel = @import("core/kernel.zig").Kernel;
+pub const Pipeline = @import("core/pipeline.zig").Pipeline;
+
+test {
+    _ = @import("kernels/test.zig");
+}

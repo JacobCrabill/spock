@@ -44,12 +44,16 @@ pub const Kernel = struct {
     };
 
     /// Build a compute pipeline from a SPIR-V module.
+    ///
+    /// NOTE: We have a hard-coded limit of 64 buffers available.
+    /// If you need more, change the code!
     pub fn create(ctx: *Context, desc: Config) !Kernel {
         const dev = ctx.device;
 
+        var bindings_buf = std.mem.zeroes([64]vk.DescriptorSetLayoutBinding);
+        const bindings: []vk.DescriptorSetLayoutBinding = bindings_buf[0..desc.buffers];
+
         // Descriptor set layout: N storage buffers on the compute stage.
-        const bindings = try ctx.gpa.alloc(vk.DescriptorSetLayoutBinding, desc.buffers);
-        defer ctx.gpa.free(bindings);
         for (bindings, 0..) |*b, i| b.* = .{
             .binding = @intCast(i),
             .descriptor_type = .storage_buffer,
@@ -87,6 +91,7 @@ pub const Kernel = struct {
         defer dev.destroyShaderModule(module, null); // baked into the pipeline; not needed after
 
         var pipelines: [1]vk.Pipeline = undefined;
+
         _ = try dev.createComputePipelines(.null_handle, &[_]vk.ComputePipelineCreateInfo{.{
             .stage = .{ .stage = .{ .compute = true }, .module = module, .p_name = desc.entry },
             .layout = layout,

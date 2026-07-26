@@ -26,12 +26,13 @@ pub fn build(b: *std.Build) void {
     const vk_registry = b.option([]const u8, "vk-registry", "Path to the Vulkan registry (vk.xml) used by -Dgen-vk") orelse "/usr/share/vulkan/registry/vk.xml";
 
     // Import the spock module
-    const spock_mod = b.dependency("spock", .{
+    const spock_dep = b.dependency("spock", .{
         .@"gen-vk" = gen_vk,
         .@"vk-registry" = vk_registry,
         .target = target,
         .optimize = optimize,
-    }).module("spock");
+    });
+    const spock_mod = spock_dep.module("spock");
 
     // A generated `config` module carries the compile-time workgroup size to
     // both the kernel and the host, keeping them in sync from one -Dwgsize.
@@ -46,12 +47,14 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/kernels/filter.zig"),
         .imports = &.{.{ .name = "config", .mod = cfg_mod }},
         .optimize = optimize,
+        .spock_dep = spock_dep,
     });
 
     const dgemm_spv = spock.addSpirvKernel(b, .{
         .name = "dgemm",
         .root_source_file = b.path("src/kernels/dgemm.zig"),
         .optimize = optimize,
+        .spock_dep = spock_dep,
     });
 
     // Demo Executable

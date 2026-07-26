@@ -28,6 +28,8 @@ pub const Buffer = @import("core/buffer.zig").Buffer;
 pub const Kernel = @import("core/kernel.zig").Kernel;
 pub const Pipeline = @import("core/pipeline.zig").Pipeline;
 
+pub const kernels = @import("kernels/kernels.zig");
+
 test {
     _ = @import("kernels/tests/dgemm.zig");
     _ = @import("kernels/tests/dgemv.zig");

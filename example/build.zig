@@ -50,12 +50,10 @@ pub fn build(b: *std.Build) void {
         .spock_dep = spock_dep,
     });
 
-    const dgemm_spv = spock.addSpirvKernel(b, .{
-        .name = "dgemm",
-        .root_source_file = b.path("src/kernels/dgemm.zig"),
-        .optimize = optimize,
-        .spock_dep = spock_dep,
-    });
+    // 2. dgemm is one of spock's built-in BLAS kernels, so there is nothing to
+    //    compile here: take the module spock already built and exposed by name.
+    //    The matching `PushConstants` / `WgSize` come from `spock.kernels.blas.dgemm`.
+    const dgemm_spv = spock_dep.namedLazyPath("spock/dgemm.spv");
 
     // Demo Executable
     const exe = b.addExecutable(.{
@@ -70,7 +68,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("config", cfg_mod);
     exe.root_module.addImport("spock", spock_mod);
     exe.root_module.addAnonymousImport("filter.spv", .{ .root_source_file = kernel_spv });
-    exe.root_module.addAnonymousImport("dgemm.spv", .{ .root_source_file = dgemm_spv });
+    exe.root_module.addAnonymousImport("spock/dgemm.spv", .{ .root_source_file = dgemm_spv });
     b.installArtifact(exe);
 
     const run = b.addRunArtifact(exe);

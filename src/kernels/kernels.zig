@@ -23,6 +23,8 @@ pub const blas = struct {
 pub const basic = struct {
     pub const addvecf32 = @import("basic/addvecf32.zig");
     pub const addvecf64 = @import("basic/addvecf64.zig");
+    pub const addveci32 = @import("basic/addveci32.zig");
+    pub const addveci64 = @import("basic/addveci64.zig");
 };
 
 test {
@@ -30,6 +32,8 @@ test {
     _ = @import("tests/dgemv.zig");
     _ = @import("tests/sgemm.zig");
     _ = @import("tests/sgemv.zig");
-    _ = @import("tests/addvecf64.zig");
     _ = @import("tests/addvecf32.zig");
+    _ = @import("tests/addvecf64.zig");
+    _ = @import("tests/addveci32.zig");
+    _ = @import("tests/addveci64.zig");
 }

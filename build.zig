@@ -91,6 +91,8 @@ const blas_kernels = [_][]const u8{
 const basic_kernels = [_][]const u8{
     "addvecf32",
     "addvecf64",
+    "addveci32",
+    "addveci64",
 };
 
 /// Zig build module definition for `addImport()`
@@ -159,7 +161,7 @@ fn addSpvPatchTool(b: *std.Build, opts: KernelOpts) *std.Build.Step.Compile {
 pub fn addSpirvKernel(b: *std.Build, opts: KernelOpts) std.Build.LazyPath {
     const spirv_target = b.resolveTargetQuery(std.Target.Query.parse(.{
         .arch_os_abi = "spirv32-vulkan",
-        .cpu_features = "vulkan_v1_2+float64",
+        .cpu_features = "vulkan_v1_2+float64+int64",
     }) catch @panic("bad spirv target"));
 
     const kernel = b.addObject(.{

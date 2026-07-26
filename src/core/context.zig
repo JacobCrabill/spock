@@ -144,7 +144,10 @@ pub const Context = struct {
             .queue_count = 1,
             .p_queue_priorities = &prio,
         }};
-        const features: vk.PhysicalDeviceFeatures = .{ .shader_float_64 = .true };
+        const features: vk.PhysicalDeviceFeatures = .{
+            .shader_float_64 = .true,
+            .shader_int_64 = .true,
+        };
         const dev_handle = try instance.createDevice(phys, &.{
             .queue_create_info_count = 1,
             .p_queue_create_infos = &qci,

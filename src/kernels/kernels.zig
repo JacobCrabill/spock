@@ -20,9 +20,16 @@ pub const blas = struct {
     pub const sgemv = @import("blas/sgemv.zig");
 };
 
+pub const basic = struct {
+    pub const addvecf32 = @import("basic/addvecf32.zig");
+    pub const addvecf64 = @import("basic/addvecf64.zig");
+};
+
 test {
     _ = @import("tests/dgemm.zig");
     _ = @import("tests/dgemv.zig");
     _ = @import("tests/sgemm.zig");
     _ = @import("tests/sgemv.zig");
+    _ = @import("tests/addvecf64.zig");
+    _ = @import("tests/addvecf32.zig");
 }

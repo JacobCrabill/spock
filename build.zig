@@ -62,6 +62,16 @@ pub fn build(b: *std.Build) void {
         b.addNamedLazyPath(spv_name, spv);
         test_exe.root_module.addAnonymousImport(spv_name, .{ .root_source_file = spv });
     }
+    inline for (basic_kernels) |name| {
+        const spv = addSpirvKernel(b, .{
+            .name = name,
+            .root_source_file = b.path(b.fmt("src/kernels/basic/{s}.zig", .{name})),
+            .optimize = optimize,
+        });
+        const spv_name = "spock/" ++ name ++ ".spv";
+        b.addNamedLazyPath(spv_name, spv);
+        test_exe.root_module.addAnonymousImport(spv_name, .{ .root_source_file = spv });
+    }
 
     const run_step = b.addRunArtifact(test_exe);
     run_step.has_side_effects = true; // Force the test to always be run on command
@@ -76,6 +86,11 @@ const blas_kernels = [_][]const u8{
     "dgemv",
     "sgemm",
     "sgemv",
+};
+
+const basic_kernels = [_][]const u8{
+    "addvecf32",
+    "addvecf64",
 };
 
 /// Zig build module definition for `addImport()`

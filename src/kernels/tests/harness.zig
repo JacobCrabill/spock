@@ -35,7 +35,7 @@ pub fn dispatch(
     entry: [*:0]const u8,
     buffers: []const spock.Kernel.Binding,
     push_constant: anytype,
-    groups: u32,
+    groups: [3]u32,
 ) !void {
     const ctx = try context();
     const Pc = @typeInfo(@TypeOf(push_constant)).pointer.child;
@@ -51,7 +51,7 @@ pub fn dispatch(
     try kernel.dispatch(.{
         .buffers = buffers,
         .push_constant = std.mem.asBytes(push_constant),
-        .groups = .{ groups, 1, 1 },
+        .groups = groups,
     });
     try ctx.wait();
 }

@@ -53,7 +53,7 @@ test "sgemm" {
 
     // alpha = 1, beta = 0 — the plain product, with `C` never read back.
     const pc = sgemm.PushConstants{ .M = M, .N = N, .K = K, .alpha = 1.0, .beta = 0.0 };
-    try harness.dispatch(sgemm_spv, "sgemm", &buffers, &pc, groups);
+    try harness.dispatch(sgemm_spv, "sgemm", &buffers, &pc, .{ groups, 1, 1 });
 
     Cmat.copyToHost(host);
     if (debug_print) harness.printMatrix("C", host, M, N);
@@ -66,7 +66,7 @@ test "sgemm" {
     for (expected, &scaled) |e, *s| s.* = 5.0 * e;
 
     const pc_scaled = sgemm.PushConstants{ .M = M, .N = N, .K = K, .alpha = 2.0, .beta = 3.0 };
-    try harness.dispatch(sgemm_spv, "sgemm", &buffers, &pc_scaled, groups);
+    try harness.dispatch(sgemm_spv, "sgemm", &buffers, &pc_scaled, .{ groups, 1, 1 });
 
     Cmat.copyToHost(host);
     try harness.expectApproxEqualSlices(f32, scaled[0..], host, harness.tolFor(f32));
@@ -77,7 +77,7 @@ test "sgemm" {
     for (scaled, &halved) |s, *h| h.* = 0.5 * s;
 
     const pc_scale_only = sgemm.PushConstants{ .M = M, .N = N, .K = K, .alpha = 0.0, .beta = 0.5 };
-    try harness.dispatch(sgemm_spv, "sgemm", &buffers, &pc_scale_only, groups);
+    try harness.dispatch(sgemm_spv, "sgemm", &buffers, &pc_scale_only, .{ groups, 1, 1 });
 
     Cmat.copyToHost(host);
     try harness.expectApproxEqualSlices(f32, halved[0..], host, harness.tolFor(f32));

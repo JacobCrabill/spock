@@ -42,7 +42,7 @@ test "dgemv" {
 
     // alpha = 1, beta = 0 — the plain product, with `y` never read back.
     const pc = dgemv.PushConstants{ .M = M, .N = N, .alpha = 1.0, .beta = 0.0 };
-    try harness.dispatch(dgemv_spv, "dgemv", &buffers, &pc, groups);
+    try harness.dispatch(dgemv_spv, "dgemv", &buffers, &pc, .{ groups, 1, 1 });
 
     yvec.copyToHost(host);
     if (debug_print) harness.printMatrix("y", host, 1, M);
@@ -51,7 +51,7 @@ test "dgemv" {
     // Re-dispatch over the result with alpha != 1 and beta != 0, so the
     // accumulate path is covered too.
     const pc_scaled = dgemv.PushConstants{ .M = M, .N = N, .alpha = 2.0, .beta = 3.0 };
-    try harness.dispatch(dgemv_spv, "dgemv", &buffers, &pc_scaled, groups);
+    try harness.dispatch(dgemv_spv, "dgemv", &buffers, &pc_scaled, .{ groups, 1, 1 });
 
     yvec.copyToHost(host);
     try harness.expectApproxEqualSlices(f64, expected_scaled[0..], host, harness.tolFor(f64));

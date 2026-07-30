@@ -33,7 +33,7 @@ test "addveci64" {
     defer std.testing.allocator.free(host);
 
     const pc = addveci64.PushConstants{ .N = N };
-    try harness.dispatch(addveci64_spv, "addveci64", &buffers, &pc, groups);
+    try harness.dispatch(addveci64_spv, "addveci64", &buffers, &pc, .{ groups, 1, 1 });
 
     zvec.copyToHost(host);
     try std.testing.expectEqualSlices(i64, expected_z[0..], host);

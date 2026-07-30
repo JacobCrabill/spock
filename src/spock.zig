@@ -16,6 +16,8 @@ pub const vk = @import("vulkan");
 
 pub const Context = @import("core/context.zig").Context;
 pub const Buffer = @import("core/buffer.zig").Buffer;
+/// Where a `Buffer`'s memory lives: host-visible, or the device's own.
+pub const Location = @import("core/buffer.zig").Location;
 pub const Kernel = @import("core/kernel.zig").Kernel;
 pub const Pipeline = @import("core/pipeline.zig").Pipeline;
 

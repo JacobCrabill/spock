@@ -42,7 +42,7 @@ test "a binding can point at one block of a buffer" {
         .{ .buffer = c.raw(), .offset = block * @sizeOf(f64), .size = M * N * @sizeOf(f64) },
     };
     const pc = dgemm.PushConstants{ .M = M, .N = N, .K = K, .alpha = 1.0, .beta = 0.0 };
-    try harness.dispatch(dgemm_spv, "dgemm", &buffers, &pc, harness.groupsFor(M * N, dgemm.WgSize.x));
+    try harness.dispatch(dgemm_spv, "dgemm", &buffers, &pc, dgemm.groups(M, N));
 
     // The first block is exactly as it was
     for (c.slice()[0..block]) |v| try std.testing.expectEqual(@as(f64, -1.0), v);

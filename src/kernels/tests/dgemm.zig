@@ -43,7 +43,6 @@ test "dgemm" {
         harness.printMatrix("B", Bmat.slice(), K, N);
     }
 
-    const groups = harness.groupsFor(M * N, dgemm.WgSize.x);
     const buffers = [_]spock.Kernel.Binding{ .whole(Amat.raw()), .whole(Bmat.raw()), .whole(Cmat.raw()) };
 
     const host = try std.testing.allocator.alloc(f64, M * N);
@@ -51,7 +50,7 @@ test "dgemm" {
 
     // alpha = 1, beta = 0 — the plain product, with `C` never read back.
     const pc = dgemm.PushConstants{ .M = M, .N = N, .K = K, .alpha = 1.0, .beta = 0.0 };
-    try harness.dispatch(dgemm_spv, "dgemm", &buffers, &pc, groups);
+    try harness.dispatch(dgemm_spv, "dgemm", &buffers, &pc, dgemm.groups(M, N));
 
     Cmat.copyToHost(host);
     if (debug_print) harness.printMatrix("C", host, M, N);
@@ -64,7 +63,7 @@ test "dgemm" {
     for (expected, &scaled) |e, *s| s.* = 5.0 * e;
 
     const pc_scaled = dgemm.PushConstants{ .M = M, .N = N, .K = K, .alpha = 2.0, .beta = 3.0 };
-    try harness.dispatch(dgemm_spv, "dgemm", &buffers, &pc_scaled, groups);
+    try harness.dispatch(dgemm_spv, "dgemm", &buffers, &pc_scaled, dgemm.groups(M, N));
 
     Cmat.copyToHost(host);
     try harness.expectApproxEqualSlices(f64, scaled[0..], host, harness.tolFor(f64));
@@ -75,8 +74,70 @@ test "dgemm" {
     for (scaled, &halved) |s, *h| h.* = 0.5 * s;
 
     const pc_scale_only = dgemm.PushConstants{ .M = M, .N = N, .K = K, .alpha = 0.0, .beta = 0.5 };
-    try harness.dispatch(dgemm_spv, "dgemm", &buffers, &pc_scale_only, groups);
+    try harness.dispatch(dgemm_spv, "dgemm", &buffers, &pc_scale_only, dgemm.groups(M, N));
 
     Cmat.copyToHost(host);
     try harness.expectApproxEqualSlices(f64, halved[0..], host, harness.tolFor(f64));
+}
+
+test "dgemm - assorted shapes against a host reference" {
+    // The hand-written case above is 8x8, which is exactly one strip and so
+    // never exercises the row-tiling. These do: row counts either side of
+    // `tile_m`, and one that is not a multiple of it, checked against the
+    // definition rather than against tabulated numbers.
+    const ctx = try harness.context();
+    const gpa = std.testing.allocator;
+
+    var prng: std.Random.DefaultPrng = .init(0x5EED_5EED);
+    const rand = prng.random();
+
+    const shapes = [_][3]u32{
+        .{ 1, 1, 1 },
+        .{ 3, 5, 2 },
+        .{ 8, 64, 8 }, // exactly one strip
+        .{ 16, 129, 16 }, // two strips, ragged column count
+        .{ 13, 37, 11 }, // a strip that runs off the end
+        .{ 33, 17, 4 },
+    };
+
+    for (shapes) |shape| {
+        const M, const N, const K = shape;
+
+        var a = try spock.Buffer(f64).create(ctx, M * K);
+        defer a.deinit();
+        var b = try spock.Buffer(f64).create(ctx, K * N);
+        defer b.deinit();
+        var c = try spock.Buffer(f64).create(ctx, M * N);
+        defer c.deinit();
+
+        for (a.slice()) |*v| v.* = rand.floatNorm(f64);
+        for (b.slice()) |*v| v.* = rand.floatNorm(f64);
+        for (c.slice()) |*v| v.* = rand.floatNorm(f64);
+
+        const want = try gpa.alloc(f64, M * N);
+        defer gpa.free(want);
+
+        const alpha = 2.0;
+        const beta = -0.5;
+        for (0..M) |i| {
+            for (0..N) |j| {
+                var sum: f64 = 0.0;
+                for (0..K) |k| sum += a.slice()[i * K + k] * b.slice()[k * N + j];
+                want[i * N + j] = alpha * sum + beta * c.slice()[i * N + j];
+            }
+        }
+
+        const buffers = [_]spock.Kernel.Binding{
+            .whole(a.raw()),
+            .whole(b.raw()),
+            .whole(c.raw()),
+        };
+        const pc = dgemm.PushConstants{ .M = M, .N = N, .K = K, .alpha = alpha, .beta = beta };
+        try harness.dispatch(dgemm_spv, "dgemm", &buffers, &pc, dgemm.groups(M, N));
+
+        harness.expectApproxEqualSlices(f64, want, c.slice(), harness.tolFor(f64)) catch |err| {
+            std.debug.print("shape M={d} N={d} K={d}\n", .{ M, N, K });
+            return err;
+        };
+    }
 }

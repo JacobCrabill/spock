@@ -27,7 +27,7 @@ test "addvecf64" {
     for (expected_z[0..], 0..) |*v, i| v.* = @floatFromInt((3 * i) + 1);
 
     const groups = harness.groupsFor(N, addvecf64.WgSize.x);
-    const buffers = [_]spock.vk.Buffer{ xvec.raw(), yvec.raw(), zvec.raw() };
+    const buffers = [_]spock.Kernel.Binding{ .whole(xvec.raw()), .whole(yvec.raw()), .whole(zvec.raw()) };
 
     const host = try std.testing.allocator.alloc(f64, N);
     defer std.testing.allocator.free(host);

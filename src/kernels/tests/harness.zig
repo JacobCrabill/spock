@@ -33,7 +33,7 @@ pub fn context() !*spock.Context {
 pub fn dispatch(
     spirv: []const u8,
     entry: [*:0]const u8,
-    buffers: []const spock.vk.Buffer,
+    buffers: []const spock.Kernel.Binding,
     push_constant: anytype,
     groups: u32,
 ) !void {

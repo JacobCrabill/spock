@@ -44,7 +44,7 @@ test "dgemm" {
     }
 
     const groups = harness.groupsFor(M * N, dgemm.WgSize.x);
-    const buffers = [_]spock.vk.Buffer{ Amat.raw(), Bmat.raw(), Cmat.raw() };
+    const buffers = [_]spock.Kernel.Binding{ .whole(Amat.raw()), .whole(Bmat.raw()), .whole(Cmat.raw()) };
 
     const host = try std.testing.allocator.alloc(f64, M * N);
     defer std.testing.allocator.free(host);

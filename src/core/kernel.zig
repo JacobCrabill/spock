@@ -32,10 +32,35 @@ pub const Kernel = struct {
         push_constant_size: u32 = 0,
     };
 
+    /// One storage-buffer argument.
+    ///
+    /// The common case is a whole buffer, which is what `.whole(buf)` gives and
+    /// what the defaults mean:
+    ///
+    ///     .buffers = &.{ .whole(a), .whole(b), .whole(c) },
+    ///
+    /// Set `offset`/`size` to bind part of one instead -- a single array holding
+    /// several blocks, say, with each dispatch aimed at its own:
+    ///
+    ///     .buffers = &.{ .whole(a), .{ .buffer = b, .offset = n * bytes, .size = bytes } },
+    pub const Binding = struct {
+        buffer: vk.Buffer,
+        /// Byte offset into `buffer`. Must be a multiple of the device's
+        /// `minStorageBufferOffsetAlignment`, which `record` checks.
+        offset: vk.DeviceSize = 0,
+        /// Bytes to bind from `offset`; the rest of the buffer by default.
+        size: vk.DeviceSize = vk.WHOLE_SIZE,
+
+        /// The whole buffer.
+        pub fn whole(buffer: vk.Buffer) Binding {
+            return .{ .buffer = buffer };
+        }
+    };
+
     pub const DispatchArgs = struct {
         /// Storage-buffer arguments, in binding order. Length must equal the
         /// kernel's `buffers` count.
-        buffers: []const vk.Buffer,
+        buffers: []const Binding,
         /// Push-constant bytes (e.g. `std.mem.asBytes(&pc)`). Length must equal
         /// the kernel's `push_constant_size`.
         push_constant: []const u8 = &.{},
@@ -168,8 +193,13 @@ pub const Kernel = struct {
         // Point the descriptor set at the caller's buffers.
         const infos = try alloc.alloc(vk.DescriptorBufferInfo, self.n_buffers);
         const writes = try alloc.alloc(vk.WriteDescriptorSet, self.n_buffers);
+        const align_to = self.ctx.props.limits.min_storage_buffer_offset_alignment;
         for (args.buffers, infos, writes, 0..) |b, *info, *w, i| {
-            info.* = .{ .buffer = b, .offset = 0, .range = vk.WHOLE_SIZE };
+            // Vulkan rejects a misaligned storage-buffer offset, but only via a
+            // validation message the caller may not have switched on. Say so.
+            if (align_to != 0 and b.offset % align_to != 0) return Error.BadDispatchArgs;
+
+            info.* = .{ .buffer = b.buffer, .offset = b.offset, .range = b.size };
             w.* = .{
                 .dst_set = self.dset,
                 .dst_binding = @intCast(i),

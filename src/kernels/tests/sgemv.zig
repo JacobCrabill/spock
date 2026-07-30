@@ -37,7 +37,7 @@ test "sgemv" {
     if (debug_print) harness.printMatrix("A", Amat.slice(), M, N);
 
     const groups = harness.groupsFor(M, sgemv.WgSize.x);
-    const buffers = [_]spock.vk.Buffer{ Amat.raw(), xvec.raw(), yvec.raw() };
+    const buffers = [_]spock.Kernel.Binding{ .whole(Amat.raw()), .whole(xvec.raw()), .whole(yvec.raw()) };
 
     const host = try std.testing.allocator.alloc(f32, M);
     defer std.testing.allocator.free(host);

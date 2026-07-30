@@ -28,6 +28,7 @@ pub const basic = struct {
 };
 
 test {
+    _ = @import("tests/binding.zig");
     _ = @import("tests/dgemm.zig");
     _ = @import("tests/dgemv.zig");
     _ = @import("tests/sgemm.zig");

@@ -23,4 +23,6 @@ pub const kernels = @import("kernels/kernels.zig");
 
 test "spock" {
     @import("std").testing.refAllDecls(@This());
+
+    _ = @import("core/buffer.zig");
 }

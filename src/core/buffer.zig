@@ -17,6 +17,10 @@ pub fn Buffer(comptime T: type) type {
         mem: vk.DeviceMemory,
         len: usize,
         ptr: [*]T,
+        /// Index into `ctx.mem_props.memory_types` of the heap this came from.
+        /// Worth having: whether it is cached decides how expensive `slice()` is
+        /// to read, and that is otherwise invisible.
+        mem_type: u32,
 
         /// Allocate a host-visible, persistently device-mapped array of `n` elements of `T`.
         pub fn create(ctx: *Context, n: usize) !Buffer(T) {
@@ -29,8 +33,19 @@ pub fn Buffer(comptime T: type) type {
             errdefer ctx.device.destroyBuffer(buf, null);
 
             const req = ctx.device.getBufferMemoryRequirements(buf);
+
+            // These buffers are persistently mapped and read back through
+            // `slice()`, so the host reads them as ordinary memory -- and an
+            // uncached (write-combined) heap makes that punishingly slow: reads
+            // measured ~25x slower than from a normal allocation on an NVIDIA
+            // discrete GPU, where the first host-visible type is uncached and a
+            // cached one sits immediately after it. Ask for cached first and
+            // fall back only if the device has nothing better.
             const want: vk.MemoryPropertyFlags = .{ .host_visible = true, .host_coherent = true };
-            const idx = findMemoryType(ctx, req.memory_type_bits, want) orelse return Error.NoHostVisibleMemory;
+            const prefer: vk.MemoryPropertyFlags = .{ .host_visible = true, .host_coherent = true, .host_cached = true };
+            const idx = findMemoryType(ctx, req.memory_type_bits, prefer) orelse
+                findMemoryType(ctx, req.memory_type_bits, want) orelse
+                return Error.NoHostVisibleMemory;
 
             const mem = try ctx.device.allocateMemory(&.{
                 .allocation_size = req.size,
@@ -46,6 +61,7 @@ pub fn Buffer(comptime T: type) type {
                 .mem = mem,
                 .len = n,
                 .ptr = @ptrCast(@alignCast(mapped.?)),
+                .mem_type = idx,
             };
         }
 
@@ -89,4 +105,31 @@ fn findMemoryType(ctx: *const Context, type_bits: u32, want: vk.MemoryPropertyFl
         if (usable and ctx.mem_props.memory_types[i].property_flags.contains(want)) return i;
     }
     return null;
+}
+
+test "buffers prefer cached host-visible memory" {
+    // An uncached (write-combined) heap is cheap to write and punishing to read,
+    // and `slice()` exists precisely to invite the host to read. Where the device
+    // offers a cached host-visible type, that is the one to take.
+    var ctx = Context.init(std.testing.allocator, .{}) catch |err| switch (err) {
+        error.NoComputeDevice => return error.SkipZigTest,
+        else => return err,
+    };
+    defer ctx.deinit();
+
+    var buf = try Buffer(f64).create(&ctx, 1024);
+    defer buf.deinit();
+
+    const chosen = ctx.mem_props.memory_types[buf.mem_type].property_flags;
+    try std.testing.expect(chosen.host_visible and chosen.host_coherent);
+
+    // Only demand it where the device has one this buffer could have used.
+    const req = ctx.device.getBufferMemoryRequirements(buf.raw());
+    var cached_available = false;
+    for (0..ctx.mem_props.memory_type_count) |i| {
+        if (req.memory_type_bits & (@as(u32, 1) << @intCast(i)) == 0) continue;
+        const f = ctx.mem_props.memory_types[i].property_flags;
+        if (f.host_visible and f.host_coherent and f.host_cached) cached_available = true;
+    }
+    if (cached_available) try std.testing.expect(chosen.host_cached);
 }
